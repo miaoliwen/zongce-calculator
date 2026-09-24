@@ -1,0 +1,20 @@
+# 本地工具产物（勿提交）
+.qoder-credits/
+.workbuddy/
+
+# 运行时生成的诊断快照（含成绩截图，注意隐私）
+debug/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 环境变量与密钥
+.env
+*.env
+
+# 日志与自测输出
+*.log
+tests/_selftest*_out.txt

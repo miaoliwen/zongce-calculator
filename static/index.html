@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>综测计算器</title>
+<style>
+  :root{
+    --bg:#f4f6f9;
+    --card:#ffffff;
+    --line:#edf0f4;
+    --text:#181b20;
+    --muted:#8a93a0;
+    --faint:#b6bdc7;
+    --blue:#2563eb;
+    --field:#f6f8fb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  [hidden]{display:none !important}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    padding:30px 16px calc(30px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:520px;margin:0 auto}
+
+  h1{font-size:28px;font-weight:700;text-align:center;letter-spacing:-.02em}
+  .sub{text-align:center;color:var(--muted);font-size:14px;margin:7px 0 24px}
+
+  /* 卡片 */
+  .card{
+    background:var(--card);border-radius:18px;padding:18px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 26px -18px rgba(16,24,40,.20);
+    margin-bottom:14px;
+  }
+  .card h2{
+    font-size:14px;font-weight:600;color:var(--muted);
+    margin-bottom:14px;letter-spacing:.02em;
+  }
+
+  /* 通用输入框 */
+  input{
+    height:50px;padding:0 14px;border:1.5px solid transparent;border-radius:13px;
+    background:var(--field);color:var(--text);
+    font-size:17px;font-weight:600;font-family:inherit;
+    font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+    transition:border-color .15s,box-shadow .15s,background .15s;
+  }
+  input::placeholder{font-weight:500;color:var(--faint);font-size:15px}
+  input:focus{outline:none;background:#fff;border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.11)}
+  input[type=number]{-moz-appearance:textfield;text-align:right}
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+  /* 课程行 */
+  .course{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .course .no{
+    width:22px;flex:none;font-size:14px;color:var(--faint);
+    text-align:center;font-weight:600;
+  }
+  .course input{flex:1;min-width:0}
+  .course .del{
+    width:32px;height:32px;flex:none;border:0;border-radius:9px;background:transparent;
+    color:#ccd3dc;font-size:19px;line-height:1;cursor:pointer;
+    display:grid;place-items:center;transition:.15s;
+  }
+  .course .del:hover{background:#fef2f2;color:#dc2626}
+
+  .add{
+    width:100%;height:46px;margin-top:4px;border:1.5px dashed #d8dee6;border-radius:13px;
+    background:transparent;color:var(--muted);font-family:inherit;font-size:14.5px;
+    font-weight:500;cursor:pointer;transition:.15s;
+  }
+  .add:hover{border-color:var(--blue);color:var(--blue);background:#f5f8ff}
+
+  /* 单行输入 */
+  .line{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+  .line:last-child{margin-bottom:0}
+  .line span{flex:1;font-size:16px;font-weight:500}
+  .line input{width:132px;flex:none}
+
+  /* 总分（置于顶部，滚动时吸顶始终可见） */
+  .total{
+    position:sticky;top:12px;z-index:5;
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+    background:linear-gradient(135deg,#2563eb,#1d4ed8);
+    color:#fff;border-radius:18px;padding:20px 22px;
+    box-shadow:0 12px 32px -14px rgba(37,99,235,.65), 0 2px 8px rgba(16,24,40,.06);
+  }
+  .total span{font-size:15px;opacity:.82;font-weight:500}
+  .total b{font-size:44px;font-weight:750;letter-spacing:-.035em;font-variant-numeric:tabular-nums;line-height:1}
+
+  .tip{text-align:center;font-size:12.5px;color:var(--faint);margin:11px 0 16px}
+
+  /* 底部 */
+  .foot{display:flex;justify-content:center;gap:24px;margin-top:18px}
+  .foot button{
+    border:0;background:transparent;color:var(--muted);font-family:inherit;
+    font-size:13.5px;cursor:pointer;padding:6px 2px;transition:.15s;
+  }
+  .foot button:hover{color:var(--text)}
+
+  details.fx{margin-top:16px}
+  details.fx summary{
+    list-style:none;cursor:pointer;text-align:center;
+    font-size:13px;color:var(--faint);user-select:none;padding:6px;
+  }
+  details.fx summary::-webkit-details-marker{display:none}
+  details.fx summary::before{content:"▸ ";display:inline-block;transition:transform .2s}
+  details.fx[open] summary::before{transform:rotate(90deg)}
+  details.fx summary:hover{color:var(--muted)}
+  .fx-body{
+    background:#fff;border-radius:16px;padding:16px 18px;margin-top:8px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04);
+    font-size:12.5px;line-height:1.85;color:#4b5563;
+  }
+  .fx-body div + div{margin-top:7px}
+  .fx-body code{
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;
+    color:#1e40af;background:#f1f5fb;padding:1px 5px;border-radius:5px;
+  }
+  .fx-note{margin-top:11px;padding-top:11px;border-top:1px solid var(--line);color:var(--faint);line-height:1.7}
+
+  /* 版权说明 */
+  .copy{
+    text-align:center;font-size:12.5px;color:var(--muted);
+    margin-top:26px;letter-spacing:.02em;
+  }
+
+  .toast{
+    position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));
+    transform:translate(-50%,12px);background:#181b20;color:#fff;font-size:13.5px;
+    padding:10px 18px;border-radius:11px;opacity:0;pointer-events:none;
+    transition:.25s;z-index:60;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* ============ 教务系统自动抓取 ============ */
+  .jw{margin-top:15px;padding-top:14px;border-top:1px solid var(--line)}
+  .jw-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .jw-btn{
+    min-height:46px;flex:1;min-width:140px;border:1.5px solid var(--blue);border-radius:13px;
+    background:var(--blue);color:#fff;font-family:inherit;font-size:15px;font-weight:600;
+    cursor:pointer;transition:.15s;padding:0 12px;
+  }
+  .jw-btn.secondary{background:#fff;color:var(--blue)}
+  .jw-btn:active{transform:scale(.98)}
+  .jw-btn:disabled{opacity:.5;cursor:default}
+  .jw-state{font-size:13px;color:var(--muted);margin-top:9px}
+  .jw-state.ok{color:#16a34a;font-weight:600}
+  .jw-filters{display:flex;gap:10px;margin-top:11px;flex-wrap:wrap}
+  .jw-filters select{
+    flex:1;min-width:130px;height:48px;padding:0 12px;border:1.5px solid transparent;border-radius:13px;
+    background:var(--field);font-size:15px;font-family:inherit;font-weight:600;color:var(--text);
+  }
+  .jw-filters select:focus{outline:none;background:#fff;border-color:var(--blue)}
+  .jw-filters .jw-btn{flex:1 1 100%}
+  .jw-log{
+    margin-top:11px;background:var(--field);border-radius:11px;padding:9px 12px;
+    font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
+    max-height:120px;overflow:auto;white-space:pre-wrap;
+  }
+  .jw-note{margin-top:11px;font-size:12.5px;color:var(--muted);line-height:1.7}
+  .jw-alt{margin-top:9px;text-align:center;font-size:12.5px;color:var(--faint);cursor:pointer}
+  .jw-alt:hover{color:var(--blue)}
+
+  /* 二维码弹窗 */
+  .mask{
+    position:fixed;inset:0;background:rgba(16,24,40,.5);z-index:70;
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .mask[hidden]{display:none}
+  .sheet{background:#fff;border-radius:20px;padding:22px 20px;width:100%;max-width:340px;text-align:center}
+  .sheet h3{font-size:17px;font-weight:700;margin-bottom:14px}
+  .qrbox{position:relative;width:220px;height:220px;margin:0 auto}
+  .qrbox > img{width:220px;height:220px;display:block}
+  .qrcover{
+    position:absolute;inset:0;background:rgba(255,255,255,.94);
+    display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
+    font-weight:600;font-size:14px;padding:10px;text-align:center;
+  }
+  .qrcover[hidden]{display:none}
+  .qrstatus{margin-top:13px;font-weight:600;font-size:14.5px}
+  .qrtip2{margin-top:7px;font-size:12px;color:var(--faint);line-height:1.6}
+  .sheet .jw-btn{margin-top:15px;flex:none;width:100%}
+
+  /* 合规声明弹窗（多人共用模式） */
+  .consent-body{text-align:left;font-size:13.5px;color:#4b5563;line-height:1.9;margin-bottom:4px}
+  .consent-body b{color:var(--text)}
+  .consent-no{margin-top:10px;font-size:12px;color:var(--faint)}
+
+  @media (max-width:480px){
+    body{padding:22px 12px calc(22px + env(safe-area-inset-bottom))}
+    h1{font-size:24px}
+    .sub{margin-bottom:18px}
+    .card{padding:15px;border-radius:16px}
+    .line input{width:110px}
+    .total{padding:17px 18px;border-radius:16px}
+    .total b{font-size:38px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>综测计算器</h1>
+  <p class="sub">在下面填数字，总分自动更新</p>
+
+  <div class="total">
+    <span>综合测评分</span>
+    <b id="totalNum">0.00</b>
+  </div>
+  <p class="tip">满分 93.00 分</p>
+
+  <section class="card">
+    <h2>专业学习成绩</h2>
+    <div id="courseList"></div>
+    <button class="add" id="addCourse">＋ 加一门课</button>
+
+    <!-- 教务系统自动抓取 -->
+    <div class="jw">
+      <div class="jw-actions">
+        <button class="jw-btn" id="jwLogin" type="button">扫码登录教务系统</button>
+      </div>
+      <div class="jw-state" id="jwState">未登录（仅支持学习通 App 扫码，账密已关停）</div>
+      <div class="jw-filters" id="jwFilters" hidden>
+        <select id="jwYear" disabled></select>
+        <select id="jwTerm" disabled></select>
+        <button class="jw-btn" id="jwCrawl" type="button" disabled>开始抓取</button>
+      </div>
+      <div class="jw-alt" id="jwAlt" hidden>二维码加载失败？点此改用弹窗扫码</div>
+      <div class="jw-log" id="jwLog" hidden></div>
+      <div class="jw-note" id="jwNote" hidden></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>其他几项</h2>
+    <div class="line"><span>思想品德考评分</span><input type="number" id="moral" min="0" max="100" step="0.1" inputmode="decimal" placeholder="0 – 100"></div>
+    <div class="line"><span>宿舍平均分</span><input type="number" id="labor" min="0" max="100" step="0.1" inputmode="decimal" placeholder="0 – 100"></div>
+    <div class="line"><span>PU 分</span><input type="number" id="pu" min="0" step="0.1" inputmode="decimal" placeholder="如 8.5"></div>
+    <div class="line"><span>体育总评</span><input type="number" id="sport" min="0" max="100" step="0.1" inputmode="decimal" placeholder="0 – 100"></div>
+    <div class="line"><span>心理总评</span><input type="number" id="psych" min="0" max="100" step="0.1" inputmode="decimal" value="100"></div>
+  </section>
+
+  <div class="foot">
+    <button id="copyBtn">复制结果</button>
+    <button id="resetBtn">全部清空</button>
+  </div>
+
+  <details class="fx" id="fxBox">
+    <summary>查看计算公式</summary>
+    <div class="fx-body">
+      <div>综合测评分 = 0.60 × 专业学习测评 + 0.20 × 思想品德 + 0.10 × 劳动素养测评 + 0.05 × 能力发展测评 + 0.05 × 身心素质</div>
+      <div>专业学习测评 = <code>Σ(各学科总评分 × 对应学分) ÷ Σ学分</code></div>
+      <div>思想品德 = 考评分 × 0.8</div>
+      <div>劳动素养测评 = 宿舍平均分 × 0.8</div>
+      <div>能力发展测评 = PU 分 × 10（超过 100 按 100 计）</div>
+      <div>身心素质 = 体育总评 × 0.8 × 0.5 + 心理总评 × 0.8 × 0.5</div>
+      <div class="fx-note">
+        各项均以满分 100 分计，本公式理论上限为 93.00 分；心理总评默认按 100 分计。<br>
+        建议把填写的数字代入公式用计算器核对一遍。结果仅供参考，最终成绩以学校公布为准。
+      </div>
+    </div>
+  </details>
+
+  <p class="copy">@&lt;你的署名&gt;制作</p>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 二维码弹窗 -->
+<div class="mask" id="qrMask" hidden>
+  <div class="sheet">
+    <h3>学习通 App 扫码登录</h3>
+    <div class="qrbox">
+      <img id="qrImg" alt="登录二维码">
+      <div class="qrcover" id="qrCover" hidden>
+        <span id="qrCoverTxt"></span>
+        <button class="jw-btn secondary" id="qrRetry" type="button" hidden style="min-height:40px">刷新二维码</button>
+      </div>
+    </div>
+    <div class="qrstatus" id="qrStatus">正在打开二维码…</div>
+    <div class="qrtip2">打开学习通 App 右上角「扫一扫」，并在手机上确认登录</div>
+    <button class="jw-btn secondary" id="qrCancel" type="button">取消</button>
+  </div>
+</div>
+
+<!-- 合规声明弹窗（多人共用模式首次访问） -->
+<div class="mask" id="consentMask" hidden>
+  <div class="sheet">
+    <h3>使用前必读</h3>
+    <div class="consent-body">
+      本工具<b>仅限查询本人学业成绩</b>：<br>
+      1. 必须用<b>本人</b>学习通账号扫码登录；<br>
+      2. <b>禁止</b>查询、抓取任何<b>他人</b>的成绩信息；<br>
+      3. 不得高频请求，遵守学校教务系统使用规定；<br>
+      4. 违规使用造成的一切后果由使用者本人承担。
+    </div>
+    <button class="jw-btn" id="consentOk" type="button">我已阅读并同意</button>
+    <div class="consent-no">不同意请关闭本页，勿继续使用。</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var LS_KEY = "zongce_simple_v1";   // 与旧版共用，历史数据可继续读取
+  var FX_KEY = "zongce_formula_open_v1";
+  var FULL   = 93;                   // 0.6×100 + 0.2×80 + 0.1×80 + 0.05×100 + 0.05×80
+  var ROWS   = 5;                    // 初始空行数
+
+  var state = { courses: [], moral:"", labor:"", pu:"", sport:"", psych:"100" };
+  for (var i = 0; i < ROWS; i++) state.courses.push({ score:"", credit:"" });
+
+  var $ = function(id){ return document.getElementById(id); };
+  var num = function(v){ var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+  var has = function(v){ return v !== "" && v !== null && v !== undefined && !isNaN(parseFloat(v)); };
+  var fmt = function(v){ return (isFinite(v) ? v : 0).toFixed(2); };
+  var clamp = function(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); };
+
+  /* ---------- 本地保存 ---------- */
+  function save(){
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e){}
+  }
+  function load(){
+    try {
+      var o = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+      if (!o || typeof o !== "object") return;
+      if (Array.isArray(o.courses) && o.courses.length){
+        state.courses = o.courses.map(function(c){
+          return { score: c.score === undefined ? "" : c.score,
+                   credit: c.credit === undefined ? "" : c.credit };
+        });
+      }
+      ["moral","labor","pu","sport","psych"].forEach(function(k){
+        if (o[k] !== undefined && o[k] !== null) state[k] = o[k];
+      });
+    } catch(e){}
+  }
+
+  /* ---------- 课程行 ---------- */
+  function makeRow(c, i){
+    var row = document.createElement("div");
+    row.className = "course";
+
+    var no = document.createElement("span");
+    no.className = "no";
+    no.textContent = i + 1;
+
+    var sc = document.createElement("input");
+    sc.type = "number"; sc.min = "0"; sc.max = "100"; sc.step = "0.1";
+    sc.inputMode = "decimal"; sc.placeholder = "成绩";
+    sc.value = c.score === "" ? "" : c.score;
+    sc.setAttribute("data-i", i); sc.setAttribute("data-f", "score");
+
+    var cr = document.createElement("input");
+    cr.type = "number"; cr.min = "0"; cr.step = "0.5";
+    cr.inputMode = "decimal"; cr.placeholder = "学分";
+    cr.value = c.credit === "" ? "" : c.credit;
+    cr.setAttribute("data-i", i); cr.setAttribute("data-f", "credit");
+
+    var del = document.createElement("button");
+    del.className = "del"; del.type = "button"; del.title = "删除这一行";
+    del.innerHTML = "&times;";
+    del.setAttribute("data-del", i);
+
+    row.appendChild(no); row.appendChild(sc); row.appendChild(cr); row.appendChild(del);
+    return row;
+  }
+
+  function renderCourses(){
+    var box = $("courseList");
+    box.innerHTML = "";
+    state.courses.forEach(function(c, i){ box.appendChild(makeRow(c, i)); });
+  }
+
+  // 末尾始终留一行空白，不用手动点「加一门课」
+  function ensureTrailingBlank(){
+    var last = state.courses[state.courses.length - 1];
+    if (last && (last.score !== "" || last.credit !== "")){
+      state.courses.push({ score:"", credit:"" });
+      return true;
+    }
+    return false;
+  }
+
+  // 只追加一个新节点，不重绘 —— 避免打断正在输入的光标
+  function appendBlankRow(){
+    var i = state.courses.length;
+    state.courses.push({ score:"", credit:"" });
+    $("courseList").appendChild(makeRow(state.courses[i], i));
+  }
+
+  /* ---------- 计算 ---------- */
+  function compute(){
+    var sumWC = 0, sumC = 0;
+    state.courses.forEach(function(c){
+      if (has(c.score) && num(c.credit) > 0){
+        sumWC += num(c.score) * num(c.credit);
+        sumC  += num(c.credit);
+      }
+    });
+    var academic = sumC > 0 ? sumWC / sumC : 0;
+    var moral    = num(state.moral) * 0.8;
+    var labor    = num(state.labor) * 0.8;
+    var ability  = Math.min(num(state.pu) * 10, 100);
+    var body     = num(state.sport) * 0.8 * 0.5 + num(state.psych) * 0.8 * 0.5;
+    var total    = 0.60 * academic + 0.20 * moral + 0.10 * labor
+                 + 0.05 * ability + 0.05 * body;
+    return { academic:academic, moral:moral, labor:labor,
+             ability:ability, body:body, total:total, sumWC:sumWC, sumC:sumC };
+  }
+
+  function render(){
+    var r = compute();
+    $("totalNum").textContent = fmt(r.total);
+    save();
+    return r;
+  }
+
+  /* ---------- 交互 ---------- */
+  $("courseList").addEventListener("input", function(e){
+    var t = e.target, i = t.getAttribute("data-i"), f = t.getAttribute("data-f");
+    if (i === null || !f) return;
+    state.courses[+i][f] = t.value;
+    // 动到最后一行就自动补一行空白；只追加节点不重绘，光标不会跳
+    var last = state.courses.length - 1;
+    if (+i === last && (state.courses[last].score !== "" || state.courses[last].credit !== "")){
+      appendBlankRow();
+    }
+    render();
+  });
+
+  $("courseList").addEventListener("click", function(e){
+    var d = e.target.closest("[data-del]");
+    if (!d) return;
+    state.courses.splice(+d.getAttribute("data-del"), 1);
+    if (!state.courses.length) state.courses.push({ score:"", credit:"" });
+    ensureTrailingBlank();
+    renderCourses(); render();
+  });
+
+  // 离开输入框时纠正越界值：成绩 0–100，学分 0–30
+  $("courseList").addEventListener("focusout", function(e){
+    var t = e.target, i = t.getAttribute("data-i"), f = t.getAttribute("data-f");
+    if (i === null || !f || t.value === "") return;
+    var v = num(t.value);
+    if (f === "score")       v = clamp(v, 0, 100);
+    else if (f === "credit") v = clamp(v, 0, 30);
+    else return;
+    t.value = v;
+    state.courses[+i][f] = String(v);
+    render();
+  });
+
+  $("addCourse").addEventListener("click", function(){
+    state.courses.push({ score:"", credit:"" });
+    renderCourses(); render();
+    var list = $("courseList").querySelectorAll("input[data-f=score]");
+    if (list.length) list[list.length - 1].focus();
+  });
+
+  ["moral","labor","pu","sport","psych"].forEach(function(id){
+    var el = $(id);
+    el.addEventListener("input", function(){ state[id] = this.value; render(); });
+    el.addEventListener("blur", function(){
+      if (this.value === "") return;
+      var v = num(this.value);
+      if (v < 0) v = 0;
+      if (id !== "pu" && v > 100) v = 100;
+      this.value = v; state[id] = String(v); render();
+    });
+  });
+
+  $("copyBtn").addEventListener("click", function(){
+    var r = compute();
+    var text = [
+      "综合测评分：" + fmt(r.total) + " / " + fmt(FULL),
+      "",
+      "专业学习测评：" + fmt(r.academic) + "（Σ成绩×学分 " + fmt(r.sumWC) + " ÷ 学分合计 " + fmt(r.sumC) + "）",
+      "思想品德：" + fmt(r.moral),
+      "劳动素养测评：" + fmt(r.labor),
+      "能力发展测评：" + fmt(r.ability),
+      "身心素质：" + r.body.toFixed(2)
+    ].join("\n");
+
+    function ok(){ toast("已复制"); }
+    function fb(){
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:-9999px;opacity:0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); ok(); } catch(e){ toast("复制失败，请手动选择"); }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(ok, fb);
+    } else { fb(); }
+  });
+
+  $("resetBtn").addEventListener("click", function(){
+    if (!confirm("确定清空全部内容？")) return;
+    state = { courses:[], moral:"", labor:"", pu:"", sport:"", psych:"100" };
+    for (var i = 0; i < ROWS; i++) state.courses.push({ score:"", credit:"" });
+    try { localStorage.removeItem(LS_KEY); } catch(e){}
+    $("moral").value = ""; $("labor").value = ""; $("pu").value = "";
+    $("sport").value = ""; $("psych").value = "100";
+    renderCourses(); render(); toast("已清空");
+  });
+
+  var toastTimer = null;
+  function toast(msg){
+    var el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ el.classList.remove("show"); }, 1700);
+  }
+
+  /* ============================================================
+   * 教务系统自动抓取（信息查询 → 全部成绩查询）
+   * 依赖本地服务 app.py（python app.py，默认 127.0.0.1:8765）。
+   * 页面由本地服务打开时用相对地址；HTML 单独打开（file://）时
+   * 回退到绝对地址。
+   * ============================================================ */
+  var API = location.protocol === "file:" ? "http://127.0.0.1:8765" : "";
+  /* 访问令牌：后端设置了 ZC_TOKEN 时必填。
+     用「网址?token=xxx」打开一次即记住（存 localStorage，之后无需再带）。 */
+  var ZC_TOKEN = (function(){
+    try {
+      var q = new URLSearchParams(location.search).get("token");
+      if (q){ localStorage.setItem("zc_token", q); return q; }
+      return localStorage.getItem("zc_token") || "";
+    } catch(e){ return ""; }
+  })();
+  var SERVER_HEADED = true;   // 由 /api/capabilities 探测：无头（服务器）时隐藏“弹窗扫码”
+  var jwLoggedIn = false;
+  var scanTimer = null;
+  var logTimer = null;
+
+  function jwHeaders(json){
+    var h = {};
+    if (json) h["Content-Type"] = "application/json";
+    if (ZC_TOKEN) h["X-Token"] = ZC_TOKEN;
+    return h;
+  }
+  /* <img> 无法自定义请求头，二维码图片只能把令牌放 query（后端仅对该路径放行） */
+  function qrUrl(){
+    return API + "/api/scan/qr.png?t=" + Date.now() +
+           (ZC_TOKEN ? "&token=" + encodeURIComponent(ZC_TOKEN) : "");
+  }
+  function showAlt(){ if (SERVER_HEADED) $("jwAlt").hidden = false; }
+
+  function jwPost(path, body){
+    return fetch(API + path, {
+      method: "POST",
+      headers: jwHeaders(true),
+      body: JSON.stringify(body || {})
+    }).then(function(r){
+      if (r.status === 401) throw new Error("未授权：请在网址后加 ?token=你的访问令牌 再打开一次");
+      if (r.status === 409) return r.json().then(function(d){ throw new Error(d.error || "服务正忙"); });
+      return r.json().catch(function(){ return { ok:false, error:"HTTP " + r.status }; });
+    }).then(function(d){
+      if (d.ok === false) throw new Error(d.error || "请求失败");
+      return d;
+    });
+  }
+
+  /* 探测后端能力：无头（云服务器）时“改用弹窗扫码”点了必失败，直接隐藏 */
+  var CONSENT_KEY = "zc_consent_v1";
+  (function probeCapabilities(){
+    fetch(API + "/api/capabilities", { headers: jwHeaders(false) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        SERVER_HEADED = !!d.headed;
+        if (!SERVER_HEADED){ $("jwAlt").hidden = true; }
+        if (d.auth_required && !ZC_TOKEN){
+          $("jwState").textContent = "需要访问令牌：请在网址后加 ?token=… 再打开一次";
+          $("jwState").className = "jw-state";
+        }
+        /* 多人共用：首次访问必须先同意合规声明 */
+        if (d.multiuser){
+          var agreed = false;
+          try { agreed = !!localStorage.getItem(CONSENT_KEY); } catch(e){}
+          if (!agreed) $("consentMask").hidden = false;
+        }
+      })
+      .catch(function(){});
+  })();
+  $("consentOk").addEventListener("click", function(){
+    try { localStorage.setItem(CONSENT_KEY, "1"); } catch(e){}
+    $("consentMask").hidden = true;
+  });
+
+  /* ----- 二维码弹窗 ----- */
+  function qrShow(){ $("qrMask").hidden = false; }
+  function qrHide(){ $("qrMask").hidden = true; stopScanPoll(); }
+  function qrStatus(t){ $("qrStatus").textContent = t; }
+  function qrCover(t, showRetry){
+    $("qrCover").hidden = !t;
+    $("qrCoverTxt").textContent = t || "";
+    $("qrRetry").hidden = !showRetry;
+  }
+  function stopScanPoll(){
+    if (scanTimer){ clearInterval(scanTimer); scanTimer = null; }
+  }
+
+  function pollScan(){
+    fetch(API + "/api/scan/state", { headers: jwHeaders(false) })
+      .then(function(r){ return r.json(); }).then(function(s){
+      if (s.state === "waiting"){
+        qrStatus("请使用学习通 App 扫码");
+        qrCover("");
+      } else if (s.state === "scanned"){
+        qrStatus("已扫码" + (s.nick ? "（" + s.nick + "）" : "") + "，请在手机上确认");
+      } else if (s.state === "expired"){
+        qrStatus("二维码已失效");
+        qrCover("二维码已失效", true);
+        stopScanPoll();
+      } else if (s.state === "confirmed"){
+        stopScanPoll();
+        qrStatus("登录成功，正在读取学年学期…");
+        afterJwLogin().then(qrHide);
+      }
+    }).catch(function(){});
+  }
+
+  /* ----- 登录方式一：页内二维码 ----- */
+  $("jwLogin").addEventListener("click", function(){
+    qrShow(); qrStatus("正在打开二维码…"); qrCover("");
+    jwPost("/api/scan/start", { mode:"inline" }).then(function(){
+      $("qrImg").src = qrUrl();
+      qrStatus("请使用学习通 App 扫码");
+      stopScanPoll();
+      scanTimer = setInterval(pollScan, 3000);   // 与官方页 3s 轮询同步，减半请求量
+    }).catch(function(e){
+      qrStatus("二维码打开失败");
+      qrCover(e.message, true);
+      showAlt();
+    });
+  });
+
+  /* ----- 登录方式二：弹窗扫码（兜底） ----- */
+  function windowLogin(){
+    qrShow(); qrStatus("正在弹出浏览器窗口…"); qrCover("");
+    jwPost("/api/scan/start", { mode:"window" }).then(function(){
+      qrStatus("请在弹出的浏览器窗口中扫码");
+      return jwPost("/api/scan/wait");
+    }).then(function(r){
+      if (r.state === "confirmed"){
+        qrStatus("登录成功，正在读取学年学期…");
+        afterJwLogin().then(qrHide);
+      } else {
+        qrStatus("等待超时"); qrCover("等待超时", true);
+      }
+    }).catch(function(e){
+      qrStatus("窗口扫码失败"); qrCover(e.message, true);
+    });
+  }
+  $("jwAlt").addEventListener("click", windowLogin);
+
+  $("qrRetry").addEventListener("click", function(){
+    jwPost("/api/scan/refresh").then(function(){
+      $("qrImg").src = qrUrl();
+      qrStatus("请使用学习通 App 扫码"); qrCover("");
+      stopScanPoll();
+      scanTimer = setInterval(pollScan, 3000);   // 与官方页 3s 轮询同步，减半请求量
+    }).catch(function(e){ qrCover(e.message, true); });
+  });
+  $("qrCancel").addEventListener("click", qrHide);
+
+  /* ----- 登录成功：读取真实学年/学期选项 ----- */
+  function afterJwLogin(){
+    jwLoggedIn = true;
+    $("jwState").textContent = "✓ 已登录教务系统";
+    $("jwState").className = "jw-state ok";
+    return jwPost("/api/options").then(function(d){
+      var f = d.filters || {};
+      fillSel($("jwYear"), f.year);
+      fillSel($("jwTerm"), f.term);
+      $("jwFilters").hidden = false;
+    });
+  }
+  function fillSel(sel, item){
+    sel.innerHTML = "";
+    if (!item){ sel.disabled = true; sel.innerHTML = "<option>无</option>"; return; }
+    item.options.forEach(function(o){
+      var op = document.createElement("option");
+      op.value = o.value; op.textContent = o.text;
+      sel.appendChild(op);
+    });
+    sel.disabled = false;
+    $("jwCrawl").disabled = false;
+  }
+
+  /* ----- 进度日志 ----- */
+  function startLog(){
+    $("jwLog").hidden = false;
+    var tick = function(){
+      fetch(API + "/api/progress").then(function(r){ return r.json(); }).then(function(d){
+        $("jwLog").textContent = (d.logs || []).slice(-30).join("\n");
+        $("jwLog").scrollTop = $("jwLog").scrollHeight;
+      }).catch(function(){});
+    };
+    tick(); logTimer = setInterval(tick, 1200);
+  }
+  function stopLog(){ if (logTimer){ clearInterval(logTimer); logTimer = null; } }
+
+  /* ----- 开始抓取 ----- */
+  $("jwCrawl").addEventListener("click", function(){
+    var filled = state.courses.some(function(c){ return c.score !== "" || c.credit !== ""; });
+    if (filled && !confirm("抓取结果将覆盖当前成绩列表，是否继续？")) return;
+    $("jwCrawl").disabled = true;
+    startLog();
+    jwPost("/api/crawl", { year: $("jwYear").value, term: $("jwTerm").value })
+      .then(function(d){ importGradeRows(d.rows || [], d.excluded || []); })
+      .catch(function(e){
+        toast("抓取失败：" + e.message);
+      })
+      .then(function(){
+        $("jwCrawl").disabled = false;
+        stopLog();
+      });
+  });
+
+  /* ----- 归一化成绩 → 填入课程行 -----
+   * 数字成绩 → 直接填入“成绩/学分”参与加权；
+   * 等级成绩（优秀/通过，无数值）→ 无法参与加权，单独列出，避免丢失。 */
+  function importGradeRows(rows, excluded){
+    var numeric = rows.filter(function(r){ return r.score != null; });
+    var graded  = rows.filter(function(r){ return r.score == null; });
+
+    state.courses = numeric.map(function(r){
+      return { score: String(r.score), credit: r.credit != null ? String(r.credit) : "" };
+    });
+    if (!state.courses.length) state.courses.push({ score:"", credit:"" });
+    ensureTrailingBlank();
+    renderCourses(); render();
+
+    var note = $("jwNote");
+    var lines = [];
+    if (graded.length){
+      lines.push("另有 <b>" + graded.length + "</b> 门等级成绩课程（不计入加权）：" +
+        graded.map(function(r){
+          return (r.name || "课程") + "（" + (r.score_raw || "等级") +
+            (r.credit != null ? "，" + r.credit + "学分" : "") + "）";
+        }).join("；"));
+    }
+    if (excluded && excluded.length){
+      lines.push("已剔除 <b>" + excluded.length + "</b> 门不纳入专业成绩的课程：" +
+        excluded.map(function(r){
+          return (r.name || "课程") +
+            (r.score_raw != null ? "（" + r.score_raw : "（-") +
+            (r.credit != null ? "，" + r.credit + "学分）" : "）");
+        }).join("；"));
+    }
+    if (lines.length){
+      note.hidden = false;
+      note.innerHTML = lines.join("<br>");
+    } else {
+      note.hidden = true; note.innerHTML = "";
+    }
+    toast("已导入 " + numeric.length + " 门数字成绩" +
+          (graded.length ? "，" + graded.length + " 门等级成绩" : "") +
+          (excluded && excluded.length ? "，已剔除 " + excluded.length + " 门体育类课程" : ""));
+
+    window.dispatchEvent(new CustomEvent("zongce:grades-filled", { detail: rows }));
+  }
+
+  /* ----- 对外集成接口 ----- */
+  window.ZongCeGradeIntegration = {
+    getRows: function(){
+      return state.courses
+        .filter(function(c){ return c.score !== "" || c.credit !== ""; })
+        .map(function(c){ return { score: c.score === "" ? null : num(c.score),
+                                   credit: c.credit === "" ? null : num(c.credit) }; });
+    },
+    fillRows: function(rows){
+      // 接受 {score,credit} 形式（score 为数值）
+      state.courses = rows.map(function(r){
+        return { score: r.score == null ? "" : String(r.score),
+                 credit: r.credit == null ? "" : String(r.credit) };
+      });
+      if (!state.courses.length) state.courses.push({ score:"", credit:"" });
+      ensureTrailingBlank();
+      renderCourses(); render();
+    }
+  };
+
+  /* ---------- 启动 ---------- */
+  // 清理旧版「教务导入」遗留的本地数据
+  try { localStorage.removeItem("zongce_import_v1"); } catch(e){}
+  load();
+  ensureTrailingBlank();      // 打开时末尾也保证有一行空白
+  $("moral").value = state.moral;
+  $("labor").value = state.labor;
+  $("pu").value    = state.pu;
+  $("sport").value = state.sport;
+  $("psych").value = state.psych;
+  renderCourses();
+  render();
+
+  // 公式区展开状态记忆（默认收起）
+  var fx = $("fxBox");
+  try { if (localStorage.getItem(FX_KEY) === "1") fx.open = true; } catch(e){}
+  fx.addEventListener("toggle", function(){
+    try { localStorage.setItem(FX_KEY, this.open ? "1" : "0"); } catch(e){}
+  });
+})();
+</script>
+</body>
+</html>

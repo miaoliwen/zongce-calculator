@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>学生端学生成绩查询-Powered by ChaoXing</title></head>
+<body>
+<!-- 模拟真实页面：顶部悬浮的查询条会遮住“搜索”按钮的中心点，
+     使 Playwright 常规 click 超时 —— 用来验证 DOM 点击回退 -->
+<div id="stickyBar" style="position:fixed; left:0; top:0; width:100%; height:260px; z-index:99; background:transparent;"></div>
+
+<div class="row">
+  <div class="pull-right">
+    <button class="btn btn-sm btn-info" onclick="search('xsdcjcxGridIdGrid')"><i class="fa "></i> 搜索</button>
+    <button class="btn btn-sm btn-info" onclick="setting('xsdcjcxGridIdGrid')"><i class="fa"></i>设置</button>
+  </div>
+</div>
+<div id="xsdcjcxGridIdGridQuery" class="form-inline">
+  <label>起始学年学期:</label>
+  <select id="startXnxq" name="startXnxq" class="form-control">
+    <option value="001" selected>入学以来</option>
+    <option value="2025-2026-2">2025-2026-2</option>
+    <option value="2025-2026-1">2025-2026-1</option>
+    <option value="2024-2025-2">2024-2025-2</option>
+    <option value="2023-2024-1">2023-2024-1</option>
+  </select>
+  <label>终止学年学期:</label>
+  <select id="endXnxq" name="endXnxq" class="form-control">
+    <option value="001" selected>入学以来</option>
+    <option value="2025-2026-2">2025-2026-2</option>
+    <option value="2025-2026-1">2025-2026-1</option>
+    <option value="2024-2025-2">2024-2025-2</option>
+    <option value="2023-2024-1">2023-2024-1</option>
+  </select>
+  <label>课程名称:</label><input type="text" id="kcmc" class="form-control">
+  <label>是否及格:</label>
+  <select id="sfjg" name="sfjg" class="form-control"><option value="">请选择</option><option value="1">是</option></select>
+  <label>课程类型:</label>
+  <select id="kclx" name="kclx" class="form-control"><option value="">全部</option><option value="1">理论课程</option></select>
+</div>
+
+<div id="gbox_xsdcjcxGridIdGrid" class="ui-jqgrid">
+  <div class="ui-jqgrid-hdiv">
+    <table class="ui-jqgrid-htable"><thead><tr>
+      <th id="jqgh_xsdcjcxGridIdGrid_xnxq"><div>学年学期</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_kcmc"><div>课程/环节</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_xf"><div>课程学分</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_kcxz"><div>课程性质</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_kcsx"><div>课程属性</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_ksxs"><div>考试形式</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_kclb"><div>课程类别</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_fxcj"><div>分项成绩</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_zhcj"><div>综合成绩</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_jd"><div>绩点</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_hdxf"><div>获得学分</div></th>
+      <th id="jqgh_xsdcjcxGridIdGrid_tscjzwmc"><div>特殊成绩标识</div></th>
+    </tr></thead></table>
+  </div>
+  <table id="xsdcjcxGridIdGrid" class="ui-jqgrid-btable" role="grid"><tbody></tbody></table>
+  <div class="ui-jqgrid-pager" id="pager_xsdcjcxGridIdGrid">
+    <table><tr>
+      <td class="ui-pg-button" id="first_xsdcjcxGridIdGrid"><span class="ui-icon ui-icon-seek-first"></span></td>
+      <td class="ui-pg-button ui-state-disabled" id="prev_xsdcjcxGridIdGrid"><span class="ui-icon ui-icon-seek-prev"></span></td>
+      <td id="input_pager_xsdcjcxGridId" dir="ltr">第<input class="ui-pg-input" type="text" size="2" maxlength="7" value="0" role="textbox">页
+        共<span class="pages">0</span>页　共<span class="records">0</span>条</td>
+      <td class="ui-pg-button ui-state-disabled" id="next_xsdcjcxGridIdGrid"><span class="ui-icon ui-icon-seek-next"></span></td>
+      <td class="ui-pg-button ui-state-disabled" id="last_xsdcjcxGridIdGrid"><span class="ui-icon ui-icon-seek-end"></span></td>
+      <td><select class="ui-pg-selbox" role="listbox" title="每页记录数"></select></td>
+    </tr></table>
+  </div>
+</div>
+<script src="_selftest_fixture.js"></script>
+</body></html>
