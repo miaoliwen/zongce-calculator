@@ -41,14 +41,14 @@ from playwright.async_api import async_playwright
 # --------------------------------------------------------------------------- #
 # 常量
 # --------------------------------------------------------------------------- #
-BASE = "https://ntsf.jw.chaoxing.com"
+BASE = os.environ.get("ZC_BASE_URL", "https://ntsf.jw.chaoxing.com")
 BASE_HOST = urlsplit(BASE).netloc      # 精确主机名：防止 chaoxing.com.evil.com 前缀伪造
 LOGIN_URL = f"{BASE}/admin/login"
 GRADES_URL = f"{BASE}/admin/indexMain/M1402"
 # 菜单「全部成绩查询」的真实内容页路径（左侧菜单 openTabForMain 的地址原样保留 /admin// 双斜杠）
 GRADES_CONTENT_PATHS = ["/admin//xsd/xsdcjcx/qbcjcx", "/admin/xsd/xsdcjcx/qbcjcx"]
 GRADES_MENU_TEXT = "全部成绩查询"
-PASSPORT = "https://passport2.chaoxing.com"
+PASSPORT = os.environ.get("ZC_PASSPORT_URL", "https://passport2.chaoxing.com")
 # 登录页 iframe 实际使用的二维码地址（pcrefer 必须与教务系统回调一致）
 SCAN_URL = (
     f"{PASSPORT}/cloudscanlogin?pcrefer="
@@ -57,9 +57,14 @@ SCAN_URL = (
     + quote("教务管理系统")
 )
 
-# 本机 Chromium 候选路径（找不到时可用 `playwright install chromium` 安装自带浏览器）
+# 系统 Chromium/Edge 兜底候选：仅在 Playwright 自带浏览器缺失时使用
+# （典型场景：打包成 exe 分发，用户机器上没执行过 `playwright install`）
 CHROMIUM_CANDIDATES = [
     os.environ.get("JW_CHROMIUM", ""),
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     "/usr/local/bin/chromium",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -175,11 +180,13 @@ def _to_float(s):
 # 核心引擎
 # --------------------------------------------------------------------------- #
 class GradeCrawler:
-    def __init__(self, debug_dir=None, headless=None, log=None):
+    def __init__(self, debug_dir=None, headless=None, log=None, progress=None):
         self.debug_dir = Path(debug_dir or DEFAULT_DEBUG_DIR)
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.headless = DEFAULT_HEADLESS if headless is None else headless
         self._log = log or (lambda msg: None)
+        # 进度回调：progress(stage, pct, detail)。pct 为 None 表示该阶段无确定百分比
+        self._progress_fn = progress or (lambda *a: None)
 
         self.pw = None
         self.browser = None
@@ -190,17 +197,75 @@ class GradeCrawler:
         self.qr_bytes = None
         self.last_excluded = []  # 最近一次抓取被剔除的课程（如体育）
 
+    def _progress(self, stage, pct=None, detail=""):
+        try:
+            self._progress_fn(stage, pct, detail)
+        except Exception:
+            pass
+
     # ---------------- 基础启动 ---------------- #
+    async def _launch_browser(self, headless, args):
+        """按优先级启动 Chromium：JW_CHROMIUM 显式指定 > Playwright 自带 > 系统候选。
+
+        自带浏览器与 Playwright 版本严格配套，必须优先；系统 Edge/Chrome 仅在
+        自带浏览器缺失时兜底（如打包成 exe 的精简环境），避免驱动不配套浏览器。
+        """
+        attempts = []
+        forced = os.environ.get("JW_CHROMIUM", "")
+        if forced and Path(forced).exists():
+            attempts.append((f"JW_CHROMIUM 指定的浏览器 {forced}",
+                             {"executable_path": forced}))
+        try:
+            bundled = self.pw.chromium.executable_path
+        except Exception:
+            bundled = None
+        if bundled and Path(bundled).exists():
+            attempts.append(("Playwright 自带 Chromium", {}))
+        attempts.extend(
+            (f"系统浏览器 {p}", {"executable_path": p})
+            for p in CHROMIUM_CANDIDATES if p and p != forced and Path(p).exists()
+        )
+        last_err = None
+        for label, extra in attempts:
+            try:
+                self._log(f"使用 {label}")
+                return await self.pw.chromium.launch(headless=headless, args=args, **extra)
+            except Exception as e:
+                last_err = e
+                self._log(f"{label} 启动失败（{e.__class__.__name__}），尝试下一个候选…")
+        try:
+            await self.pw.stop()
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Chromium 启动失败（{last_err.__class__.__name__}）。请确认已执行 "
+            "`python -m playwright install chromium`（Linux 加 --with-deps），"
+            "或用 JW_CHROMIUM 指向系统浏览器；也可设置 ZC_ENGINE=http 使用纯 HTTP 引擎。"
+        )
+
     async def start(self):
         self.pw = await async_playwright().start()
-        launch_kwargs = {"headless": self.headless, "args": [
-            "--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled",
-        ]}
-        exe = next((p for p in CHROMIUM_CANDIDATES if p and Path(p).exists()), None)
-        if exe:
-            launch_kwargs["executable_path"] = exe
-            self._log(f"使用 Chromium：{exe}")
-        self.browser = await self.pw.chromium.launch(**launch_kwargs)
+        # 无头（服务器）模式叠加一组省内存/去后台活动的参数；
+        # 刻意不加 --single-process（Playwright 不支持，渲染器崩溃即整体失败）。
+        headless_args = [
+            "--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-gpu", "--no-zygote",
+            "--disable-background-networking", "--disable-default-apps",
+            "--disable-extensions", "--disable-sync", "--disable-translate",
+            "--disable-component-update", "--disable-component-extensions-with-background-pages",
+            "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding", "--metrics-recording-only", "--mute-audio",
+            "--disable-features=TranslateUI,BackForwardCache,AcceptCHFrame,MediaRouter,"
+            "OptimizationHints,InterestFeedContentSuggestions",
+        ]
+        headed_args = [
+            "--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+        ]
+        launch_kwargs = {"headless": self.headless,
+                         "args": headless_args if self.headless else headed_args}
+        self.browser = await self._launch_browser(**launch_kwargs)
         self.context = await self.browser.new_context(
             viewport={"width": 1366, "height": 900},
             user_agent=(
@@ -221,6 +286,41 @@ class GradeCrawler:
             await self.pw.stop()
         except Exception:
             pass
+
+    async def logout(self):
+        """清除登录 cookie 与页面状态；保留浏览器进程，下次扫码无需重启 Chromium。"""
+        for attr in ("scan_page", "page"):
+            pg = getattr(self, attr, None)
+            if pg is None:
+                continue
+            try:
+                # 关页前清掉该来源的 localStorage/sessionStorage（cookie 之外的登录态兜底）
+                await pg.evaluate(
+                    "try{localStorage.clear();sessionStorage.clear()}catch(e){}"
+                )
+            except Exception:
+                pass
+            try:
+                await pg.close()
+            except Exception:
+                pass
+        self.scan_page = None
+        self.page = None
+        self.qr_bytes = None
+        self._captured = []
+        if self.context is not None:
+            try:
+                await self.context.clear_cookies()
+            except Exception as e:
+                self._log(f"清除 cookie 失败（忽略）：{e}")
+        self._log("已清除登录 cookie 与页面状态")
+
+    async def health(self):
+        """引擎是否仍连接可用（app.py 自愈逻辑调用）。"""
+        try:
+            return self.browser is not None and self.browser.is_connected()
+        except Exception:
+            return False
 
     async def _on_response(self, response):
         try:
@@ -335,7 +435,7 @@ class GradeCrawler:
         except Exception:
             pass
         self.headless = False
-        self.browser = await self.pw.chromium.launch(
+        self.browser = await self._launch_browser(
             headless=False,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
         )
@@ -1164,6 +1264,7 @@ class GradeCrawler:
 
     # ---------------- 对外主流程 ---------------- #
     async def crawl(self, year_value="__ALL__", term_value="__ALL__", filters=None):
+        self._progress("打开成绩页", 4)
         frame = await self._grades_frame()
         self._captured = []  # 只统计本次查询产生的 XHR
 
@@ -1180,6 +1281,7 @@ class GradeCrawler:
                 await self._select_one(frame, year_item, year_value)
                 await self._select_one(frame, term_item, term_value)
 
+        self._progress("提交查询", 15, f"{start_v}~{end_v}")
         await self._maximize_page_size(frame)
         before_fp = await self._grid_fingerprint(frame)
         await self._click_query(frame)
@@ -1197,10 +1299,16 @@ class GradeCrawler:
 
         raw = []
         page_no = 1
+        self._progress("抓取成绩", 22)
         while True:
             raw.extend(self._rows_from_captured())
             raw.extend(await self._rows_from_dom())
             self._log(f"第 {page_no} 页：累计原始记录 {len(raw)} 条")
+            # 浏览器模式拿不到总页数，进度随页数爬升、封顶 82%
+            self._progress(
+                "抓取成绩", min(82, 22 + page_no * 9),
+                f"第 {page_no} 页 · 累计 {len(raw)} 条",
+            )
             if not await self._goto_next_page(frame):
                 break
             page_no += 1
@@ -1211,6 +1319,7 @@ class GradeCrawler:
 
         rows = self._merge(raw)
         self._log(f"合并去重后共 {len(rows)} 门课程")
+        self._progress("解析合并", 90, f"共 {len(rows)} 门课程")
         if not rows:
             await self.dump("empty_result")
             raise RuntimeError(
@@ -1234,6 +1343,7 @@ class GradeCrawler:
             f"最终 {len(rows)} 门纳入专业成绩"
             + (f"，另剔除 {len(excluded)} 门（不纳入专业成绩）" if excluded else "")
         )
+        self._progress("完成", 100, f"{len(rows)} 门课程")
 
         rows.sort(key=lambda r: (r.get("year") or "", r.get("term") or "", r.get("code") or ""))
         return rows

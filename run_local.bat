@@ -1,21 +1,21 @@
 @echo off
 rem ============================================================
-rem ç»¼æµ‹è®¡ç®—å™¨ Â· æœ¬æœºå¯åŠ¨è„šæœ¬ï¼ˆWindowsï¼‰
-rem   ZC_HEADLESS=0ï¼šå…è®¸â€œæ”¹ç”¨å¼¹çª—æ‰«ç â€ï¼ŒäºŒç»´ç è¢«ç½‘ç»œæ‹¦æˆªæ—¶å¯å…œåº•
-rem   ZC_IDLE_CLOSE=1800ï¼šç©ºé—² 30 åˆ†é’Ÿè‡ªåŠ¨å…³æµè§ˆå™¨ï¼ˆæœ¬æœºå¯è®¾ 0 å…³é—­ï¼‰
+rem ×Û²â¼ÆËãÆ÷ ¡¤ ±¾»úÆô¶¯½Å±¾£¨Windows£©
+rem   ZC_HEADLESS=0£ºÔÊĞí¡°¸ÄÓÃµ¯´°É¨Âë¡±£¬¶şÎ¬Âë±»ÍøÂçÀ¹½ØÊ±¿É¶µµ×
+rem   ZC_IDLE_CLOSE=1800£º¿ÕÏĞ 30 ·ÖÖÓ×Ô¶¯¹Øä¯ÀÀÆ÷£¨±¾»ú¿ÉÉè 0 ¹Ø±Õ£©
 rem ============================================================
 setlocal
 cd /d "%~dp0"
 set ZC_HEADLESS=0
 set ZC_IDLE_CLOSE=1800
 set PYTHONIOENCODING=utf-8
-echo [1/2] æ£€æŸ¥ä¾èµ–...
+echo [1/2] ¼ì²éÒÀÀµ...
 python -c "import flask, playwright" 2>nul || (
-  echo ä¾èµ–ç¼ºå¤±ï¼Œæ­£åœ¨å®‰è£…...
+  echo ÒÀÀµÈ±Ê§£¬ÕıÔÚ°²×°...
   python -m pip install -r requirements.txt
   python -m playwright install chromium
 )
-echo [2/2] å¯åŠ¨æœåŠ¡ï¼šhttp://127.0.0.1:8765
+echo [2/2] Æô¶¯·şÎñ£ºhttp://127.0.0.1:8765
 echo.
 python app.py
 endlocal

@@ -35,18 +35,40 @@
 """
 
 import asyncio
+import atexit
 import os
 import re
+import sys
 import threading
 import time
 import traceback
+from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_file, send_from_directory
 
 from crawler import GradeCrawler
+from http_crawler import HttpGradeCrawler
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+
+# 请求体护栏：本项目所有接口只收很小的 JSON（筛选值），2MB 足够；
+# 超限由 errorhandler 统一返回 JSON 而不是默认 HTML。
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+
+# 抓取引擎：http=纯 HTTP（低内存）；browser=Playwright/Chromium；
+# auto（默认）= 无头（云服务器）走 http，本机（ZC_HEADLESS=0）走 browser 保留弹窗兜底
+ENGINE = os.environ.get("ZC_ENGINE", "auto").strip().lower()
+if ENGINE not in ("http", "browser", "auto"):
+    ENGINE = "auto"
+
+
+def engine_class():
+    if ENGINE == "http":
+        return HttpGradeCrawler
+    if ENGINE == "browser":
+        return GradeCrawler
+    return HttpGradeCrawler if IS_HEADLESS else GradeCrawler
 
 # --------------------------------------------------------------------------- #
 # 环境配置（云服务器上只改环境变量，不改代码）
@@ -138,6 +160,10 @@ MAX_ENGINES = max(1, _env_int("ZC_MAX_ENGINES", 2))
 _DEFAULT_IDLE = "180" if MULTIUSER else "600"
 IDLE_CLOSE_SECONDS = _env_float("ZC_IDLE_CLOSE", _DEFAULT_IDLE)
 
+# 抓取限频：同一用户两次抓取的最小间隔（秒）。短时间内反复全量抓取对教务系统
+# 不礼貌也容易触发风控；默认 60 秒，设 0 关闭。
+CRAWL_MIN_INTERVAL = max(0.0, _env_float("ZC_CRAWL_MIN_INTERVAL", 60.0))
+
 
 # --------------------------------------------------------------------------- #
 # 后台 asyncio 线程：Playwright 对象必须始终在同一个事件循环上使用
@@ -155,11 +181,15 @@ class Session:
         self.engine = None
         self.filters = None
         self.logs = []
+        # 最近一次重型操作的进度（供前端进度条轮询）：
+        # pct<0 表示该阶段无确定百分比（前端走不定长动画）
+        self.progress = {"stage": "", "pct": -1, "detail": "", "done": False, "t": 0.0}
         self._serial = asyncio.Lock()      # 协程级串行（引擎对象绝不交错操作）
         self._heavy = threading.Lock()     # Flask 线程侧的任务占位
         self.busy_label = None
         self.busy_since = 0.0
         self.last_used = time.time()
+        self.last_crawl_at = 0.0      # 上次成功抓取时刻（限频用）
 
     def log(self, msg):
         line = f"[{time.strftime('%H:%M:%S')}] {msg}"
@@ -168,16 +198,32 @@ class Session:
             self.logs = self.logs[-300:]
         print(f"[{self.uid}] {line}", flush=True)
 
+    def report(self, stage, pct=None, detail=""):
+        """爬虫回调的进度落点（爬虫可能跑在事件循环线程或 to_thread，字典赋值即可）。"""
+        p = self.progress
+        p["stage"] = str(stage or "")
+        if pct is not None:
+            try:
+                p["pct"] = max(0.0, min(100.0, float(pct)))
+            except (TypeError, ValueError):
+                pass
+        if detail:
+            p["detail"] = str(detail)
+        p["t"] = time.time()
+
     def try_begin(self, label):
         if not self._heavy.acquire(blocking=False):
             return False
         self.busy_label = label
         self.busy_since = time.time()
+        self.progress = {"stage": label, "pct": -1, "detail": "", "done": False,
+                         "t": time.time()}
         return True
 
     def end(self):
         self.busy_label = None
         self.last_used = time.time()
+        self.progress["done"] = True
         try:
             self._heavy.release()
         except RuntimeError:
@@ -246,6 +292,35 @@ class Manager:
         return self.session(getattr(g, "uid", "default"))
 
     # ---------------- 调用入口 ---------------- #
+    def _submit(self, inner, timeout, label):
+        """
+        提交协程并等待结果：超时后真正向事件循环里的 Task 发取消，
+        保证串行锁 / 全局 slot 被释放，而不是留下后台僵尸任务。
+        """
+        holder = {}
+
+        async def _guarded():
+            holder["task"] = asyncio.current_task()
+            return await inner
+
+        fut = asyncio.run_coroutine_threadsafe(_guarded(), self.loop)
+        try:
+            return fut.result(timeout)
+        except FuturesTimeout:
+            task = holder.get("task")
+            if task is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        _cancel_task(task), self.loop
+                    ).result(5)
+                except Exception:
+                    pass
+            fut.cancel()
+            self.log(f"操作「{label}」超过 {timeout}s，已取消")
+            raise RuntimeError(
+                f"操作超时（超过 {timeout} 秒），请稍后重试或缩小查询范围"
+            )
+
     def run(self, sess, coro, timeout=300):
         """同用户串行执行协程（轻量操作也走这里，避免与重型操作交错）。"""
         sess.last_used = time.time()
@@ -254,7 +329,7 @@ class Manager:
             async with sess._serial:
                 return await coro
 
-        return asyncio.run_coroutine_threadsafe(_serialized(), self.loop).result(timeout)
+        return self._submit(_serialized(), timeout, "请求")
 
     def run_heavy(self, sess, coro, timeout=300):
         """重型操作：同用户串行 + 全局并发上限（跨用户排队，而不是顶爆内存）。"""
@@ -264,7 +339,7 @@ class Manager:
             async with sess._serial, await self._get_slots():
                 return await coro
 
-        return asyncio.run_coroutine_threadsafe(_wrapped(), self.loop).result(timeout)
+        return self._submit(_wrapped(), timeout, "重型操作")
 
     async def _get_slots(self):
         if self._slots is None:
@@ -296,7 +371,20 @@ class Manager:
         绝不让存活浏览器数突破上限。
         """
         if sess.engine is not None and sess.engine.browser is not None:
-            return sess.engine
+            # 标记存在不等于真的可用：浏览器可能已崩溃/连接断开，探活失败则重建
+            try:
+                alive = await sess.engine.health()
+            except Exception:
+                alive = False
+            if alive:
+                return sess.engine
+            self.log(f"检测到用户 {sess.uid} 的引擎已失效，自动重建")
+            try:
+                await sess.engine.close()
+            except Exception:
+                pass
+            sess.engine = None
+            sess.filters = None
         deadline = time.time() + 30
         while self._live_engines() >= MAX_ENGINES:
             victim = self._lru_idle_session(exclude=sess.uid)
@@ -312,7 +400,9 @@ class Manager:
             if time.time() >= deadline:
                 raise RuntimeError("浏览器引擎数已达上限且均被占用，请稍后再试")
             await asyncio.sleep(1)
-        eng = GradeCrawler(debug_dir=sess.debug_dir, log=sess.log, headless=IS_HEADLESS)
+        cls = engine_class()
+        eng = cls(debug_dir=sess.debug_dir, log=sess.log, headless=IS_HEADLESS,
+                  progress=sess.report)
         await eng.start()
         sess.engine = eng
         return eng
@@ -344,6 +434,33 @@ class Manager:
 
 
 manager = Manager()
+
+
+async def _cancel_task(task):
+    """在事件循环线程内取消指定 Task（供 _submit 超时后调用）。"""
+    task.cancel()
+
+
+def shutdown_all_engines():
+    """进程退出前关闭全部引擎，避免浏览器/连接残留（gunicorn 优雅退出同样走这里）。"""
+    try:
+        with manager._map:
+            targets = [s for s in manager.sessions.values() if s.engine is not None]
+        for s in targets:
+            try:
+                manager.run(s, s.engine.close(), timeout=30)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+atexit.register(shutdown_all_engines)
+
+
+def worker_exit(server, worker):
+    """gunicorn 钩子（函数名固定）：worker 退出前清理引擎。"""
+    shutdown_all_engines()
 
 
 # --------------------------------------------------------------------------- #
@@ -414,6 +531,34 @@ def error(e, status=500):
     return jsonify({"ok": False, "error": str(e)}), status
 
 
+# 统一 JSON 错误响应：前端始终按 JSON 解析，避免收到 Flask 默认 HTML 错误页
+@app.errorhandler(400)
+def _h_400(e):
+    return jsonify({"ok": False, "error": "请求格式有误，请发送合法的 JSON"}), 400
+
+
+@app.errorhandler(404)
+def _h_404(e):
+    what = "接口" if request.path.startswith("/api/") else "页面"
+    return jsonify({"ok": False, "error": f"{what}不存在"}), 404
+
+
+@app.errorhandler(405)
+def _h_405(e):
+    return jsonify({"ok": False, "error": "请求方法不允许"}), 405
+
+
+@app.errorhandler(413)
+def _h_413(e):
+    return jsonify({"ok": False, "error": "请求内容过大（上限 2 MB）"}), 413
+
+
+@app.errorhandler(Exception)
+def _h_exc(e):
+    # 未预期异常：记录完整堆栈到日志/快照，响应只回可读信息
+    return error(e)
+
+
 def begin_or_409(label):
     """重量级任务入口守卫（按用户占位）：返回 (session, None) 或 (None, 409响应)。"""
     sess = manager.current()
@@ -447,6 +592,7 @@ def healthz():
         "engines": manager._live_engines(),
         "busy": busy,
         "headless": IS_HEADLESS,
+        "engine": "browser" if engine_class() is GradeCrawler else "http",
         "auth": bool(AUTH_MAP),
         "multiuser": MULTIUSER,
     })
@@ -459,9 +605,11 @@ def capabilities():
     因为服务器没有显示，弹出可见窗口必然失败。
     multiuser=True 时前端展示合规声明（仅限查询本人成绩）后才允许使用。
     """
+    cls = engine_class()
     return jsonify({
         "ok": True,
-        "headed": not IS_HEADLESS,
+        "headed": (not IS_HEADLESS) and cls is GradeCrawler,
+        "engine": "browser" if cls is GradeCrawler else "http",
         "auth_required": bool(AUTH_MAP),
         "multiuser": MULTIUSER,
         "busy": manager.current().busy_label,
@@ -474,7 +622,7 @@ def capabilities():
 @app.route("/api/scan/start", methods=["POST"])
 def scan_start():
     """启动后台浏览器并打开二维码页。mode=window 仅本机可用（服务器无显示）。"""
-    mode = (request.json or {}).get("mode", "inline")
+    mode = (request.get_json(silent=True) or {}).get("mode", "inline")
     if mode == "window" and IS_HEADLESS:
         return jsonify({
             "ok": False,
@@ -580,7 +728,7 @@ def options():
 
 @app.route("/api/crawl", methods=["POST"])
 def crawl():
-    body = request.json or {}
+    body = request.get_json(silent=True) or {}
     year_value = body.get("year", "__ALL__")
     term_value = body.get("term", "__ALL__")
     sess, resp = begin_or_409("抓取成绩")
@@ -590,12 +738,22 @@ def crawl():
     if resp:
         sess.end()
         return resp
+    # 限频：刚抓取过就别急着再来一次，减轻教务系统压力（ZC_CRAWL_MIN_INTERVAL，默认 60s）
+    wait_more = CRAWL_MIN_INTERVAL - (time.time() - sess.last_crawl_at)
+    if wait_more > 0:
+        sess.end()
+        return jsonify({
+            "ok": False,
+            "error": f"刚完成过一次成绩抓取，{int(wait_more) + 1} 秒后再试"
+                     "（减轻教务系统压力；可用 ZC_CRAWL_MIN_INTERVAL 调整，设 0 关闭）",
+        }), 429
     try:
         rows = manager.run_heavy(
             sess,
             sess.engine.crawl(year_value, term_value, sess.filters),
             timeout=300,
         )
+        sess.last_crawl_at = time.time()
         return jsonify({
             "ok": True,
             "rows": rows,
@@ -615,7 +773,12 @@ def crawl():
 
 @app.route("/api/progress")
 def progress():
-    return jsonify({"logs": manager.current().logs[-50:]})
+    sess = manager.current()
+    return jsonify({
+        "logs": sess.logs[-50:],
+        "busy": sess.busy_label,
+        "progress": dict(sess.progress),
+    })
 
 
 @app.route("/api/dump", methods=["POST"])
@@ -630,6 +793,23 @@ def dump():
     try:
         path = manager.run_heavy(sess, sess.engine.dump("manual"), timeout=60)
         return jsonify({"ok": True, "path": path})
+    except Exception as e:
+        return error(e)
+    finally:
+        sess.end()
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    """清除本人会话的登录 cookie：登录态清零，引擎保留（下次扫码登录更快）。"""
+    sess, resp = begin_or_409("清除登录")
+    if resp:
+        return resp
+    try:
+        if sess.engine is not None and sess.engine.browser is not None:
+            manager.run(sess, sess.engine.logout(), timeout=60)
+        sess.filters = None
+        return jsonify({"ok": True})
     except Exception as e:
         return error(e)
     finally:
@@ -698,5 +878,35 @@ if __name__ == "__main__":
     if not IS_HEADLESS:
         print("提示：ZC_HEADLESS=0，已启用可弹出窗口模式（适合本机）。", flush=True)
     print(f"服务启动：http://{host}:{port}   快照目录：{DEBUG_DIR}", flush=True)
-    app.run(host=host, port=port, threaded=True, debug=False)
+    if getattr(sys, "frozen", False) and not os.environ.get("ZC_NO_BROWSER"):
+        # 打包成 exe 后双击启动：自动用默认浏览器打开页面（ZC_NO_BROWSER=1 可关闭）
+        def _open_page():
+            import webbrowser
+            webbrowser.open(f"http://{host}:{port}/")
+        threading.Timer(1.5, _open_page).start()
+    def _serve():
+        """优先 waitress（生产级 WSGI，Windows 兼容）；未安装时回退 Flask 开发服务器。"""
+        try:
+            from waitress import serve
+        except ImportError:
+            print("未安装 waitress，回退到 Flask 开发服务器（仅本机使用，无碍）", flush=True)
+            app.run(host=host, port=port, threaded=True, debug=False)
+            return
+        # 抓取响应最长可挂约 300 秒：channel_timeout 必须放宽，
+        # 否则默认 120s 会把还在计算中的长请求连接掐断。
+        serve(app, host=host, port=port, threads=16, channel_timeout=600)
+
+    try:
+        _serve()
+    except OSError as e:
+        # 端口被占用等：双击 exe 时控制台一闪就关，这里给可读提示并停住窗口
+        print(
+            f"启动失败：{e}\n"
+            f"常见原因是端口 {port} 已被占用（例如已有一个综测计算器正在运行，"
+            "直接用浏览器打开 http://127.0.0.1:8765 即可）。\n"
+            "也可设置环境变量 ZC_PORT 换一个端口后重试。",
+            flush=True,
+        )
+        if os.name == "nt":
+            input("按回车键关闭窗口…")
 #（注：内容由AI生成）

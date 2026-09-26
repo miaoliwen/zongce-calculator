@@ -11,6 +11,10 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller 打包产物（app.spec 本身要提交）
+build/
+dist/
+
 # 环境变量与密钥
 .env
 *.env

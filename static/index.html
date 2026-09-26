@@ -162,6 +162,44 @@
     font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
     max-height:120px;overflow:auto;white-space:pre-wrap;
   }
+  /* 抓取进度条 */
+  .jw-progress{margin-top:11px}
+  .jw-track{
+    position:relative;height:8px;border-radius:99px;background:var(--field);
+    overflow:hidden;
+  }
+  .jw-fill{
+    position:absolute;left:0;top:0;bottom:0;width:0%;
+    border-radius:99px;
+    background:linear-gradient(90deg,#3b82f6,#2563eb);
+    transition:width .5s ease;
+  }
+  .jw-fill::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);
+    animation:jwshine 1.4s linear infinite;
+  }
+  @keyframes jwshine{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+  /* 后端未给出百分比时：不定长来回滑动 */
+  .jw-track.indet .jw-fill{width:36%;animation:jwindet 1.15s ease-in-out infinite}
+  @keyframes jwindet{0%{left:-36%}100%{left:100%}}
+  .jw-progress .meta{
+    display:flex;justify-content:space-between;gap:10px;margin-top:7px;
+    font-size:12.5px;color:var(--muted);
+  }
+  .jw-progress .meta b{
+    color:var(--blue);font-weight:700;
+    font-variant-numeric:tabular-nums;flex:none;
+  }
+  .jw-progress.ok .jw-fill{background:linear-gradient(90deg,#22c55e,#16a34a)}
+  .jw-progress.ok .meta b{color:#16a34a}
+  .jw-progress.err .jw-fill{background:linear-gradient(90deg,#f87171,#dc2626)}
+  .jw-progress.err .meta b{color:#dc2626}
+  @media (prefers-reduced-motion:reduce){
+    .jw-fill::after{animation:none}
+    .jw-fill{transition:none}
+    .jw-track.indet .jw-fill{animation:none;left:0}
+  }
   .jw-note{margin-top:11px;font-size:12.5px;color:var(--muted);line-height:1.7}
   .jw-alt{margin-top:9px;text-align:center;font-size:12.5px;color:var(--faint);cursor:pointer}
   .jw-alt:hover{color:var(--blue)}
@@ -182,6 +220,17 @@
     font-weight:600;font-size:14px;padding:10px;text-align:center;
   }
   .qrcover[hidden]{display:none}
+  .qrspin{
+    position:absolute;inset:0;background:#fff;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .qrspin .ring{
+    width:46px;height:46px;border-radius:50%;
+    border:4px solid var(--line);
+    border-top-color:var(--blue);
+    animation:qrspin .9s linear infinite;
+  }
+  @keyframes qrspin{to{transform:rotate(360deg)}}
   .qrstatus{margin-top:13px;font-weight:600;font-size:14.5px}
   .qrtip2{margin-top:7px;font-size:12px;color:var(--faint);line-height:1.6}
   .sheet .jw-btn{margin-top:15px;flex:none;width:100%}
@@ -223,12 +272,21 @@
     <div class="jw">
       <div class="jw-actions">
         <button class="jw-btn" id="jwLogin" type="button">扫码登录教务系统</button>
+        <button class="jw-btn secondary" id="jwLogout" type="button" hidden
+                title="清除本次登录 cookie 与会话，下次需重新扫码">退出登录</button>
       </div>
       <div class="jw-state" id="jwState">未登录（仅支持学习通 App 扫码，账密已关停）</div>
       <div class="jw-filters" id="jwFilters" hidden>
         <select id="jwYear" disabled></select>
         <select id="jwTerm" disabled></select>
         <button class="jw-btn" id="jwCrawl" type="button" disabled>开始抓取</button>
+      </div>
+      <div class="jw-progress" id="jwProg" hidden>
+        <div class="jw-track" id="jwTrack"><div class="jw-fill" id="jwFill"></div></div>
+        <div class="meta">
+          <span id="jwProgStage"></span>
+          <b id="jwProgPct"></b>
+        </div>
       </div>
       <div class="jw-alt" id="jwAlt" hidden>二维码加载失败？点此改用弹窗扫码</div>
       <div class="jw-log" id="jwLog" hidden></div>
@@ -277,6 +335,7 @@
     <h3>学习通 App 扫码登录</h3>
     <div class="qrbox">
       <img id="qrImg" alt="登录二维码">
+      <div class="qrspin" id="qrSpin" hidden><div class="ring"></div></div>
       <div class="qrcover" id="qrCover" hidden>
         <span id="qrCoverTxt"></span>
         <button class="jw-btn secondary" id="qrRetry" type="button" hidden style="min-height:40px">刷新二维码</button>
@@ -598,13 +657,26 @@
 
   /* ----- 二维码弹窗 ----- */
   function qrShow(){ $("qrMask").hidden = false; }
-  function qrHide(){ $("qrMask").hidden = true; stopScanPoll(); }
+  function qrHide(){ $("qrMask").hidden = true; qrLoading(false); stopScanPoll(); }
   function qrStatus(t){ $("qrStatus").textContent = t; }
   function qrCover(t, showRetry){
     $("qrCover").hidden = !t;
     $("qrCoverTxt").textContent = t || "";
     $("qrRetry").hidden = !showRetry;
   }
+  /* 二维码尚未成功拉取时的圆圈加载动画：图片 load 后隐藏，error 转可重试提示 */
+  var qrWaiting = false;
+  function qrLoading(on){
+    qrWaiting = on;
+    $("qrSpin").hidden = !on;
+  }
+  $("qrImg").addEventListener("load", function(){ qrLoading(false); });
+  $("qrImg").addEventListener("error", function(){
+    if (!qrWaiting) return;
+    qrLoading(false);
+    qrStatus("二维码加载失败");
+    qrCover("二维码加载失败，请点击刷新重试", true);
+  });
   function stopScanPoll(){
     if (scanTimer){ clearInterval(scanTimer); scanTimer = null; }
   }
@@ -631,13 +703,15 @@
 
   /* ----- 登录方式一：页内二维码 ----- */
   $("jwLogin").addEventListener("click", function(){
-    qrShow(); qrStatus("正在打开二维码…"); qrCover("");
+    qrShow(); qrStatus("正在打开二维码…"); qrCover(""); qrLoading(true);
+    $("qrImg").removeAttribute("src");   // 清掉上次会话的旧二维码
     jwPost("/api/scan/start", { mode:"inline" }).then(function(){
       $("qrImg").src = qrUrl();
       qrStatus("请使用学习通 App 扫码");
       stopScanPoll();
       scanTimer = setInterval(pollScan, 3000);   // 与官方页 3s 轮询同步，减半请求量
     }).catch(function(e){
+      qrLoading(false);
       qrStatus("二维码打开失败");
       qrCover(e.message, true);
       showAlt();
@@ -664,26 +738,52 @@
   $("jwAlt").addEventListener("click", windowLogin);
 
   $("qrRetry").addEventListener("click", function(){
+    qrLoading(true);
     jwPost("/api/scan/refresh").then(function(){
       $("qrImg").src = qrUrl();
       qrStatus("请使用学习通 App 扫码"); qrCover("");
       stopScanPoll();
       scanTimer = setInterval(pollScan, 3000);   // 与官方页 3s 轮询同步，减半请求量
-    }).catch(function(e){ qrCover(e.message, true); });
+    }).catch(function(e){ qrLoading(false); qrCover(e.message, true); });
   });
   $("qrCancel").addEventListener("click", qrHide);
 
   /* ----- 登录成功：读取真实学年/学期选项 ----- */
+  var JW_STATE_IDLE = "未登录（仅支持学习通 App 扫码，账密已关停）";
   function afterJwLogin(){
     jwLoggedIn = true;
     $("jwState").textContent = "✓ 已登录教务系统";
     $("jwState").className = "jw-state ok";
+    $("jwLogin").hidden = true;
+    $("jwLogout").hidden = false;
     return jwPost("/api/options").then(function(d){
       var f = d.filters || {};
       fillSel($("jwYear"), f.year);
       fillSel($("jwTerm"), f.term);
       $("jwFilters").hidden = false;
     });
+  }
+  /* ----- 退出登录：清除服务端登录 cookie，前端复位 ----- */
+  $("jwLogout").addEventListener("click", function(){
+    jwPost("/api/logout").then(function(){
+      resetJwUi();
+      toast("已退出登录，cookie 已清除");
+    }).catch(function(e){ toast("退出失败：" + e.message); });
+  });
+  function resetJwUi(){
+    jwLoggedIn = false;
+    $("jwLogin").hidden = false;
+    $("jwLogout").hidden = true;
+    $("jwState").textContent = JW_STATE_IDLE;
+    $("jwState").className = "jw-state";
+    $("jwFilters").hidden = true;
+    $("jwYear").disabled = true;
+    $("jwTerm").disabled = true;
+    $("jwCrawl").disabled = true;
+    $("jwNote").hidden = true; $("jwNote").innerHTML = "";
+    $("jwProg").hidden = true;
+    $("jwLog").hidden = true; $("jwLog").textContent = "";
+    stopLog(); stopProg();
   }
   function fillSel(sel, item){
     sel.innerHTML = "";
@@ -701,7 +801,8 @@
   function startLog(){
     $("jwLog").hidden = false;
     var tick = function(){
-      fetch(API + "/api/progress").then(function(r){ return r.json(); }).then(function(d){
+      fetch(API + "/api/progress", { headers: jwHeaders(false) })
+        .then(function(r){ return r.json(); }).then(function(d){
         $("jwLog").textContent = (d.logs || []).slice(-30).join("\n");
         $("jwLog").scrollTop = $("jwLog").scrollHeight;
       }).catch(function(){});
@@ -710,20 +811,75 @@
   }
   function stopLog(){ if (logTimer){ clearInterval(logTimer); logTimer = null; } }
 
+  /* ----- 抓取进度条 ----- */
+  var progTimer = null;
+  function progReset(){
+    var p = $("jwProg");
+    p.hidden = false;
+    p.classList.remove("ok", "err");
+  }
+  function progSet(stage, pct, detail){
+    if ($("jwProg").hidden) return;
+    $("jwProgStage").textContent = (stage || "抓取中") + (detail ? " · " + detail : "");
+    if (pct == null || pct < 0){
+      $("jwTrack").classList.add("indet");
+      $("jwProgPct").textContent = "";
+    } else {
+      $("jwTrack").classList.remove("indet");
+      $("jwFill").style.width = clamp(pct, 0, 100) + "%";
+      $("jwProgPct").textContent = Math.round(pct) + "%";
+    }
+  }
+  function progFinish(ok, msg){
+    var p = $("jwProg");
+    if (p.hidden) return;
+    p.classList.add(ok ? "ok" : "err");
+    $("jwTrack").classList.remove("indet");
+    if (ok){
+      $("jwFill").style.width = "100%";
+      $("jwProgPct").textContent = "100%";
+    } else {
+      $("jwProgPct").textContent = "失败";
+    }
+    if (msg) $("jwProgStage").textContent = msg;
+    setTimeout(function(){ p.hidden = true; }, ok ? 1600 : 2800);
+  }
+  function startProg(){
+    progReset();
+    progSet("开始抓取", -1);
+    stopProg();
+    var tick = function(){
+      fetch(API + "/api/progress", { headers: jwHeaders(false) })
+        .then(function(r){ return r.json(); }).then(function(d){
+        var p = d.progress || {};
+        if (!p.done) progSet(p.stage, p.pct, p.detail);
+      }).catch(function(){});
+    };
+    tick();
+    progTimer = setInterval(tick, 700);
+  }
+  function stopProg(){ if (progTimer){ clearInterval(progTimer); progTimer = null; } }
+
   /* ----- 开始抓取 ----- */
   $("jwCrawl").addEventListener("click", function(){
     var filled = state.courses.some(function(c){ return c.score !== "" || c.credit !== ""; });
     if (filled && !confirm("抓取结果将覆盖当前成绩列表，是否继续？")) return;
     $("jwCrawl").disabled = true;
     startLog();
+    startProg();
     jwPost("/api/crawl", { year: $("jwYear").value, term: $("jwTerm").value })
-      .then(function(d){ importGradeRows(d.rows || [], d.excluded || []); })
+      .then(function(d){
+        progFinish(true, "抓取完成");
+        importGradeRows(d.rows || [], d.excluded || []);
+      })
       .catch(function(e){
+        progFinish(false, "抓取失败");
         toast("抓取失败：" + e.message);
       })
       .then(function(){
         $("jwCrawl").disabled = false;
         stopLog();
+        stopProg();
       });
   });
 

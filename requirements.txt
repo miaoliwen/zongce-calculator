@@ -1,2 +1,4 @@
 flask>=3.0
+requests>=2.31
 playwright>=1.40
+waitress>=3.0
